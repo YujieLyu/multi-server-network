@@ -24,6 +24,7 @@ public class Connection extends Thread {
     private boolean open = false;
     private Socket socket;
     private boolean term = false;
+    public boolean isServer = false;
 
     Connection(Socket socket) throws IOException {
         in = new DataInputStream(socket.getInputStream());
@@ -32,6 +33,7 @@ public class Connection extends Thread {
         outWriter = new PrintWriter(out, true);
         this.socket = socket;
         open = true;
+        isServer = true;
         start();
     }
 
@@ -40,7 +42,7 @@ public class Connection extends Thread {
      */
     public boolean writeMsg(String msg) {
         if (open) {
-            outWriter.write(msg);
+            outWriter.println(msg);
             outWriter.flush();
             return true;
         }
@@ -64,7 +66,7 @@ public class Connection extends Thread {
 
     public void run() {
         try {
-            String data;
+            String data = null;
             log.debug(inReader.readLine());
             while (!term && (data = inReader.readLine()) != null) {
                 log.debug(data);
@@ -87,4 +89,13 @@ public class Connection extends Thread {
     public boolean isOpen() {
         return open;
     }
+
+    public boolean isServer() {
+        return isServer;
+    }
+
+    public void setIsServer() {
+        isServer = true;
+    }
+
 }
