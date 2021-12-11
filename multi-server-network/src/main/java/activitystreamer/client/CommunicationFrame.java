@@ -26,7 +26,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 
 @SuppressWarnings("serial")
-public class TextFrame extends JFrame implements ActionListener {
+public class CommunicationFrame extends JFrame implements ActionListener {
     private static final Logger log = LogManager.getLogger();
     private JTextArea inputText;
     private JTextArea outputText;
@@ -34,7 +34,7 @@ public class TextFrame extends JFrame implements ActionListener {
     private JButton disconnectButton;
     private JSONParser parser = new JSONParser();
 
-    public TextFrame() {
+    public CommunicationFrame() {
         setTitle("ActivityStreamer Text I/O");
         JPanel mainPanel = new JPanel();
         mainPanel.setLayout(new GridLayout(1, 2));
@@ -93,13 +93,13 @@ public class TextFrame extends JFrame implements ActionListener {
             JSONObject obj;
             try {
                 obj = (JSONObject) parser.parse(msg);
-                ClientSkeleton.getInstance().sendActivityObject(obj);
+                ClientControl.getInstance().sendActivityObject(obj);
             } catch (ParseException e1) {
                 log.error("invalid JSON object entered into input text field, data not sent");
             }
 
         } else if (e.getSource() == disconnectButton) {
-            ClientSkeleton.getInstance().disconnect();
+            ClientControl.getInstance().disconnect();
         }
     }
 }

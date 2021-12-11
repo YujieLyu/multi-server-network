@@ -9,10 +9,8 @@ import org.apache.commons.cli.ParseException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import activitystreamer.client.ClientSkeleton;
+import activitystreamer.client.ClientControl;
 import activitystreamer.util.Settings;
-
-import java.util.Arrays;
 
 public class Client {
 
@@ -73,7 +71,7 @@ public class Client {
         log.info("starting client");
 
 
-        ClientSkeleton c = ClientSkeleton.getInstance();
+        ClientControl c = ClientControl.getInstance();
 
 
     }
