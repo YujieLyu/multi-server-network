@@ -1,9 +1,9 @@
-package activitystreamer.server;
+package activitystreamer.server.models;
 
 public class User {
-    String username;
-    String secret;
-    boolean isLogin;
+    public String username;
+    public String secret;
+    public boolean isLogin;
 
     public User(String username, String secret) {
         this.username = username;

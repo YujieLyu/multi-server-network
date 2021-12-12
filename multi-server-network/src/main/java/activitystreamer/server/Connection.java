@@ -33,7 +33,6 @@ public class Connection extends Thread {
         outWriter = new PrintWriter(out, true);
         this.socket = socket;
         open = true;
-        isServer = true;
         start();
     }
 
