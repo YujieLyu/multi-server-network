@@ -5,6 +5,8 @@ import java.net.Socket;
 import java.util.ArrayList;
 import java.util.HashMap;
 
+import activitystreamer.server.models.ProcessResult;
+import activitystreamer.server.models.User;
 import activitystreamer.util.Helper;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -64,79 +66,130 @@ public class Control extends Thread {
      */
     public synchronized boolean process(Connection con, String receivedMsg) {
         JSONObject output = new JSONObject();
-        String username = null;
-        String secret = null;
-        String activity = null;
+        boolean shouldClose = false;
+
         try {
             JSONObject receivedObj = Helper.JsonParser(receivedMsg);
-            switch (receivedObj.get(MsgAttribute.COMMAND).toString()) {
-                case ClientCommands.LOGIN:
-                    if (VerifyUserLogin(username, secret)) {
-                        output.put(MsgAttribute.COMMAND, ServerCommands.LOGIN_SUCCESS);
-                        output.put(MsgAttribute.INFO, Info.LOGIN_SUCCESS_INFO);
-                    } else {
-                        output.put(MsgAttribute.COMMAND, ServerCommands.LOGIN_FAILED);
-                        output.put(MsgAttribute.INFO, Info.LOGIN_FAILED_INFO);
-                        connectionClosed(con);
-                        return true;
-                    }
-                    break;
-                case ClientCommands.REGISTER:
-                    processRegisterUser(username, secret, con);
-                    break;
-                case ClientCommands.ACTIVITY_MESSAGE:
-                    if (VerifyActivity(username, secret)) {
-                        BroadcastActivity(activity);
-                    } else {
-                        output.put(MsgAttribute.COMMAND, ServerCommands.INVALID_MESSAGE);
-                        output.put(MsgAttribute.INFO, Info.INVALID_MSG_INFO);
-                        connectionClosed(con);
-                        return true;
-                    }
-                    break;
-                case ClientCommands.LOGOUT:
-                    connectionClosed(con);
-                    return true;
-                default:
-                    output.put(MsgAttribute.COMMAND, ServerCommands.INVALID_MESSAGE);
-                    output.put(MsgAttribute.INFO, Info.INVALID_MSG_INFO);
-                    connectionClosed(con);
-                    return true;
+            if (con.isServer) {
+
+            } else {
+                ProcessResult result = processClientRequest(receivedObj);
+                output = result.getOutput();
+                shouldClose = result.getShouldConClose();
             }
             con.writeMsg(output.toJSONString());
-            return false;
+            return shouldClose;
         } catch (Exception e) {
             log.error("Error occurs when process received messages" + e.getMessage());
+            output.put(MsgAttribute.COMMAND, ServerCommands.INVALID_MESSAGE);
+            output.put(MsgAttribute.INFO, Info.INVALID_MSG_INFO);
+            con.writeMsg(output.toJSONString());
             return true;
         }
     }
 
-    private boolean VerifyUserLogin(String username, String secret) {
-
-        return true;
+    private ProcessResult processClientRequest(JSONObject receivedObj) {
+        JSONObject output = new JSONObject();
+        boolean shouldClose = false;
+        String username = null;
+        String secret = null;
+        if (receivedObj.get(MsgAttribute.USERNAME) != null) {
+            username = receivedObj.get(MsgAttribute.USERNAME).toString();
+        }
+        if (receivedObj.get(MsgAttribute.SECRET) != null) {
+            secret = receivedObj.get(MsgAttribute.SECRET).toString();
+        }
+        switch (receivedObj.get(MsgAttribute.COMMAND).toString()) {
+            case ClientCommands.LOGIN:
+                output = VerifyUserLogin(username, secret);
+                break;
+            case ClientCommands.REGISTER:
+                output = processRegisterUser(username, secret);
+                break;
+            case ClientCommands.ACTIVITY_MESSAGE:
+                String activity = receivedObj.get(MsgAttribute.ACTIVITY).toString();
+                output = VerifyActivity(username, secret, activity);
+                break;
+            case ClientCommands.LOGOUT:
+                output.put(MsgAttribute.INFO, Info.LOGOUT_INFO);
+                shouldClose = true;
+                break;
+            default:
+                output.put(MsgAttribute.COMMAND, ServerCommands.INVALID_MESSAGE);
+                output.put(MsgAttribute.INFO, Info.INVALID_MSG_INFO);
+                shouldClose = true;
+        }
+        return new ProcessResult(output, shouldClose);
     }
 
-    private JSONObject processRegisterUser(String username, String secret, Connection con) {
+    private JSONObject VerifyUserLogin(String username, String secret) {
         JSONObject output = new JSONObject();
-        if (users.containsKey(username)) {
-            if (users.get(username).isLogin) {
-                output.put(MsgAttribute.COMMAND, ServerCommands.REGISTER_FAILED);
-                output.put(MsgAttribute.INFO, Info.REGISTER_FAILED_INFO);
-                connectionClosed(con);
+        if (username != null && secret != null) {
+            if (!users.containsKey(username)) {
+                output.put(MsgAttribute.COMMAND, ServerCommands.LOGIN_FAILED);
+                output.put(MsgAttribute.INFO, Info.LOGIN_FAILED_NOT_EXIST_INFO);
+            } else if ((users.get(username).secret).equals(secret)) {
+                users.get(username).isLogin = true;
+                output.put(MsgAttribute.COMMAND, ServerCommands.LOGIN_SUCCESS);
+                output.put(MsgAttribute.INFO, Info.LOGIN_SUCCESS_INFO + ": " + username);
+            } else {
+                output.put(MsgAttribute.COMMAND, ServerCommands.LOGIN_FAILED);
+                output.put(MsgAttribute.INFO, Info.LOGIN_FAILED_INFO);
             }
-            output.put(MsgAttribute.COMMAND, ServerCommands.INVALID_MESSAGE);
-            output.put(MsgAttribute.INFO, Info.INVALID_MSG_INFO);
-            connectionClosed(con);
         } else {
-            users.put(username, new User(username, secret));
-            output.put(MsgAttribute.COMMAND, ServerCommands.REGISTER_SUCCESS);
-            output.put(MsgAttribute.INFO, Info.REGISTER_SUCCESS_INFO);
+            output.put(MsgAttribute.COMMAND, ServerCommands.LOGIN_FAILED);
+            output.put(MsgAttribute.INFO, Info.INVALID_MSG_INFO);
         }
         return output;
     }
 
-    private boolean VerifyActivity(String username, String secret) {
-        return true;
+    private JSONObject processRegisterUser(String username, String secret) {
+        JSONObject output = new JSONObject();
+        if (username != null && secret != null) {
+            if (users.containsKey(username)) {
+                if (users.get(username).isLogin) {
+                    output.put(MsgAttribute.COMMAND, ServerCommands.REGISTER_FAILED);
+                    output.put(MsgAttribute.INFO, username + " " + Info.REGISTER_FAILED_REPEAT_INFO);
+                } else {
+                    output.put(MsgAttribute.COMMAND, ServerCommands.REGISTER_FAILED);
+                    output.put(MsgAttribute.INFO, username + " " + Info.REGISTER_FAILED_USER_EXIST_INFO);
+                }
+            } else {
+                users.put(username, new User(username, secret));
+                output.put(MsgAttribute.COMMAND, ServerCommands.REGISTER_SUCCESS);
+                output.put(MsgAttribute.INFO, Info.REGISTER_SUCCESS_INFO + ": " + username);
+            }
+        } else {
+            output.put(MsgAttribute.COMMAND, ServerCommands.REGISTER_FAILED);
+            output.put(MsgAttribute.INFO, Info.REGISTER_FAILED_MISS_DETAILS_INFO);
+        }
+
+        return output;
+    }
+
+    private JSONObject VerifyActivity(String username, String secret, String activity) {
+        JSONObject output = new JSONObject();
+        try {
+            if (users.containsKey(username)) {
+                User user = users.get(username);
+                if (user.secret.equals(secret) && user.isLogin) {
+                    BroadcastActivity(activity);
+                    output.put(MsgAttribute.COMMAND, ServerCommands.ACTIVITY_BROADCAST);
+                    output.put(MsgAttribute.INFO, Info.ACTIVITY_BROADCAST_INFO + ": " + activity);
+                } else {
+                    output.put(MsgAttribute.COMMAND, ServerCommands.AUTHENTICATION_FAIL);
+                    output.put(MsgAttribute.INFO, Info.AUTH_FAIL_SECRET_INCORRECT_INFO + " OR " + Info.AUTH_FAIL_ANONYMOUS_INFO);
+                }
+            } else {
+                output.put(MsgAttribute.COMMAND, ServerCommands.AUTHENTICATION_FAIL);
+                output.put(MsgAttribute.INFO, Info.AUTH_FAIL_ANONYMOUS_INFO);
+            }
+        } catch (Exception e) {
+            log.error("Invalid message" + e.getMessage());
+            output.put(MsgAttribute.COMMAND, ServerCommands.INVALID_MESSAGE);
+            output.put(MsgAttribute.INFO, Info.INVALID_MSG_INFO);
+        }
+        return output;
     }
 
     private void BroadcastActivity(String activity) {
