@@ -10,10 +10,10 @@ import org.json.simple.JSONObject;
 
 import activitystreamer.util.Settings;
 
-import static activitystreamer.util.Constants.MsgAttribute;
 import static activitystreamer.util.Constants.ClientCommands;
 import static activitystreamer.util.Constants.ServerCommands;
 import static activitystreamer.util.Constants.Info;
+import static activitystreamer.util.Constants.MsgAttribute;
 
 public class ClientControl extends Thread {
     private static final Logger log = LogManager.getLogger();
@@ -81,8 +81,7 @@ public class ClientControl extends Thread {
                 processReceivedMsg(data);
             }
 
-            log.info("Client has sent LOGIN");
-
+            log.info("Client has sent request");
 
         } catch (IOException e) {
             log.error("Exception occurs" + e);

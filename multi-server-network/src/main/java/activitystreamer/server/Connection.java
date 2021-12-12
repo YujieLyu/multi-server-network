@@ -66,17 +66,17 @@ public class Connection extends Thread {
     public void run() {
         try {
             String data = null;
-            log.debug(inReader.readLine());
+
             while (!term && (data = inReader.readLine()) != null) {
-                log.debug(data);
-                term = Control.getInstance().process(this, data);
+                log.debug("Get data " + data);
+                term = ServerControl.getInstance().process(this, data);
             }
             log.debug("connection closed to " + Settings.socketAddress(socket));
-            Control.getInstance().connectionClosed(this);
+            ServerControl.getInstance().connectionClosed(this);
             in.close();
         } catch (IOException e) {
             log.error("connection " + Settings.socketAddress(socket) + " closed with exception: " + e);
-            Control.getInstance().connectionClosed(this);
+            ServerControl.getInstance().connectionClosed(this);
         }
         open = false;
     }
