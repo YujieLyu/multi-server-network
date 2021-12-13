@@ -45,6 +45,7 @@ public class ClientControl extends Thread {
         outWriter.flush();
     }
 
+    @SuppressWarnings("unchecked")
     public void processReceivedMsg(String receivedMsg) {
         JSONObject output = new JSONObject();
         JSONObject receivedObj = Helper.JsonParser(receivedMsg);

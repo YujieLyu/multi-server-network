@@ -12,8 +12,8 @@ public class Settings {
     private static SecureRandom random = new SecureRandom();
     private static int localPort = 3780;
     private static String localHostname = "192.168.1.20";
-    private static String remoteHostname = null;
-    private static int remotePort = 3780;
+    private static String remoteHostname = "192.168.1.100";
+    private static int remotePort = 3781;
     private static int activityInterval = 10000; // milliseconds
     private static String secret = "123";
     private static String username = "anonymous";

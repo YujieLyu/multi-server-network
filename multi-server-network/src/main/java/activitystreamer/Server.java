@@ -29,11 +29,7 @@ public class Server {
     }
 
     public static void main(String[] args) {
-
-        // MCL
         System.out.println(Arrays.toString(args));
-        // MCL
-
         log.info("reading command line options");
 
         Options options = new Options();
