@@ -14,7 +14,7 @@ public class Settings {
     private static String localHostname = "192.168.1.20";
     private static String remoteHostname = null;
     private static int remotePort = 3780;
-    private static int activityInterval = 5000; // milliseconds
+    private static int activityInterval = 10000; // milliseconds
     private static String secret = "123";
     private static String username = "anonymous";
 

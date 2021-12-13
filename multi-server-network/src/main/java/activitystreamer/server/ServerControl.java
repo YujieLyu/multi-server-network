@@ -43,9 +43,10 @@ public class ServerControl extends Thread {
     }
 
     private ServerControl() {
-        // initialize the connections array
-        //for demo purpose, use a simple fixed secret
-        //Settings.setSecret(Settings.nextSecret());
+        /*
+         *  for demo purpose, use a simple fixed secret
+         *  otherwise will use Settings.setSecret(Settings.nextSecret()) to generate a random secret
+         */
         connections = new ArrayList<>();
         connectedClients = new HashMap<>();
         connectedServers = new HashMap<>();
@@ -75,7 +76,7 @@ public class ServerControl extends Thread {
     }
 
     /*
-     * A new incoming connection has been established, and a reference is returned to it
+     *  A new incoming connection has been established, and a reference is returned to it
      */
     public synchronized Connection incomingConnection(Socket s) throws IOException {
         log.debug("incomming connection: " + Settings.socketAddress(s));
@@ -85,23 +86,23 @@ public class ServerControl extends Thread {
     }
 
     /*
-     * A new outgoing connection has been established, and a reference is returned to it
+     *  A new outgoing connection has been established, and a reference is returned to it
      */
     public synchronized Connection outgoingConnection(Socket s) throws IOException {
         log.debug("outgoing connection: " + Settings.socketAddress(s));
         Connection c = new Connection(s);
         connections.add(c);
         return c;
-
     }
 
     /*
-     * Processing incoming messages from the connection.
-     * Return true if the connection should close.
+     *  Processing incoming messages from the connection.
+     *  Return true if the connection should close.
      */
     public synchronized boolean process(Connection con, String receivedMsg) {
         JSONObject output = new JSONObject();
         boolean shouldClose = false;
+        int conReplyCount = connections.size();
         try {
             JSONObject receivedObj = Helper.JsonParser(receivedMsg);
             if (receivedObj != null && VerifyMessage(receivedObj)) {
@@ -128,6 +129,20 @@ public class ServerControl extends Thread {
                             }
                             con.writeMsg(msgToSender.toString());
                             break;
+                        case ServerCommands.LOCK_ALLOWED:
+                            log.info("LOCK_ALLOWED received");
+                            if (conReplyCount != 0) {
+                                conReplyCount--;
+                            } else {
+                                username = receivedObj.get(MsgAttribute.USERNAME).toString();
+                                String password = receivedObj.get(MsgAttribute.PASSWORD).toString();
+                                clientProcessor.processRegisterUser(username, password, true, connectedClients);
+                            }
+                            break;
+                        case ServerCommands.LOCK_DENIED:
+                            log.info("LOCK_DENIED received");
+                            clientProcessor.processRegisterUser(null, null, false, connectedClients);
+                            break;
                         case ServerCommands.SERVER_ANNOUNCE:
                             String id = receivedObj.get(MsgAttribute.ID).toString();
                             String load = receivedObj.get(MsgAttribute.LOAD).toString();
@@ -135,45 +150,57 @@ public class ServerControl extends Thread {
                             String port = receivedObj.get(MsgAttribute.PORT).toString();
                             if (!connectedServers.containsKey(id)) {
                                 connectedServers.put(id, new ServerModel(id, load, hostname, port));
+                                /*
+                                 *   First time received new conn's announcement, request authentication
+                                 *   sending for simple demo purpose, ciphertext will be used in real world
+                                 */
+                                output.put(MsgAttribute.COMMAND, ServerCommands.AUTHENTICATE);
+                                output.put(MsgAttribute.SECRET, id);
                             } else {
                                 ServerModel server = connectedServers.get(id);
                                 server.setLoad(load);
                                 server.setHostname(hostname);
                                 server.setPort(port);
                             }
-                            break;
+                            return false;
                         default:
                             return true;
                     }
                 } else {
                     String username = null;
-                    String secret = null;
+                    String password = null;
                     String receivedCommand = receivedObj.get(MsgAttribute.COMMAND).toString();
                     if (receivedObj.get(MsgAttribute.USERNAME) != null) {
                         username = receivedObj.get(MsgAttribute.USERNAME).toString();
                     }
-                    if (receivedObj.get(MsgAttribute.SECRET) != null) {
-                        secret = receivedObj.get(MsgAttribute.SECRET).toString();
+                    if (receivedObj.get(MsgAttribute.PASSWORD) != null) {
+                        password = receivedObj.get(MsgAttribute.PASSWORD).toString();
                     }
                     if (ClientCommands.REGISTER.equals(receivedCommand)) {
-                        boolean userCanRegister = false;
                         JSONObject msgToServer = new JSONObject();
-                        for (Connection conn : connections) {
-                            if (conn.isServer) {
-                                msgToServer.put(MsgAttribute.COMMAND, ServerCommands.LOCK_REQUEST);
-                                msgToServer.put(MsgAttribute.USERNAME, username);
-                                msgToServer.put(MsgAttribute.SECRET, secret);
-                                conn.writeMsg(msgToServer.toString());
+                        if (connectedServers.size() == 0) {
+                            output = clientProcessor.processRegisterUser(username, password, true, connectedClients);
+                        } else {
+                            for (Connection conn : connections) {
+                                if (conn.isServer) {
+                                    msgToServer.put(MsgAttribute.COMMAND, ServerCommands.LOCK_REQUEST);
+                                    msgToServer.put(MsgAttribute.USERNAME, username);
+                                    msgToServer.put(MsgAttribute.PASSWORD, password);
+                                    conn.writeMsg(msgToServer.toString());
+                                    log.info("LOCK_REQUEST sent");
+                                }
                             }
                         }
+                    } else {
+                        ProcessResult result = clientProcessor.processClientRequest(receivedObj, connectedClients);
+                        output = result.getOutput();
+                        shouldClose = result.getShouldConClose();
                     }
-                    ProcessResult result = clientProcessor.processClientRequest(receivedObj, connectedClients);
-                    output = result.getOutput();
                     String command = output.get(MsgAttribute.COMMAND).toString();
                     if (command.equals(ServerCommands.ACTIVITY_BROADCAST)) {
                         serverProcessor.broadcastActivity(receivedObj.get(MsgAttribute.ACTIVITY).toString());
                     }
-                    shouldClose = result.getShouldConClose();
+
                 }
             } else {
                 output = getInvalidMsgResponse();
@@ -197,9 +224,9 @@ public class ServerControl extends Thread {
                     || command.equals(ServerCommands.LOCK_REQUEST)
                     || command.equals(ServerCommands.LOCK_ALLOWED)
                     || command.equals(ServerCommands.LOCK_DENIED)) {
-                return msg.get(MsgAttribute.USERNAME) != null && msg.get(MsgAttribute.SECRET) != null;
+                return msg.get(MsgAttribute.USERNAME) != null && msg.get(MsgAttribute.PASSWORD) != null;
             } else if (command.equals(ClientCommands.ACTIVITY_MESSAGE)) {
-                return msg.get(MsgAttribute.USERNAME) != null && msg.get(MsgAttribute.SECRET) != null && msg.get(MsgAttribute.ACTIVITY) != null;
+                return msg.get(MsgAttribute.USERNAME) != null && msg.get(MsgAttribute.PASSWORD) != null && msg.get(MsgAttribute.ACTIVITY) != null;
             } else if (command.equals(ServerCommands.AUTHENTICATE)) {
                 return msg.get(MsgAttribute.SECRET) != null;
             } else if (command.equals(ServerCommands.SERVER_ANNOUNCE)) {
@@ -221,11 +248,12 @@ public class ServerControl extends Thread {
         return output;
     }
 
+
     private void serverAnnounce(Connection con) {
         JSONObject announcement = new JSONObject();
         announcement.put(MsgAttribute.COMMAND, ServerCommands.SERVER_ANNOUNCE);
         announcement.put(MsgAttribute.ID, Settings.getSecret());
-        announcement.put(MsgAttribute.LOAD, connections.size());
+        announcement.put(MsgAttribute.LOAD, connectedClients.size());
         announcement.put(MsgAttribute.HOSTNAME, Settings.getLocalHostname());
         announcement.put(MsgAttribute.PORT, Settings.getLocalPort());
         con.writeMsg(announcement.toString());
@@ -246,9 +274,11 @@ public class ServerControl extends Thread {
             // do something with 5 second intervals in between
             try {
                 for (Connection con : connections) {
-                    serverAnnounce(con);
+                    if (con.isServer) {
+                        serverAnnounce(con);
+                        log.info("Announced to server");
+                    }
                 }
-                log.info("Has announced to " + connections.size() + " connections");
                 Thread.sleep(Settings.getActivityInterval());
             } catch (InterruptedException e) {
                 log.info("received an interrupt, system is shutting down");
