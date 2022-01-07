@@ -8,7 +8,6 @@ import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
 import org.json.simple.parser.ParseException;
 
-import java.util.UUID;
 
 public class Helper {
     private static final Logger log = LogManager.getLogger();
@@ -23,8 +22,7 @@ public class Helper {
         }
     }
 
-    public static String generateString() {
-        String uuid = UUID.randomUUID().toString();
-        return "uuid = " + uuid;
+    public static String getString(JSONObject receivedObj, String field) {
+        return receivedObj.get(field).toString();
     }
 }

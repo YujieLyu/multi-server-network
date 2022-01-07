@@ -9,10 +9,12 @@ import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
 
+import activitystreamer.util.MsgField;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import activitystreamer.util.Settings;
+import org.json.simple.JSONObject;
 
 
 public class Connection extends Thread {
@@ -46,6 +48,13 @@ public class Connection extends Thread {
             return true;
         }
         return false;
+    }
+
+    public boolean reply(String command, String info) {
+        JSONObject msg = new JSONObject();
+        msg.put(MsgField.COMMAND, command);
+        msg.put(MsgField.INFO, info);
+        return writeMsg(msg.toString());
     }
 
     public void closeCon() {
@@ -93,8 +102,8 @@ public class Connection extends Thread {
         return isServer;
     }
 
-    public void setIsServer() {
-        isServer = true;
+    public void setServer(boolean isServer) {
+        this.isServer = isServer;
     }
 
 }

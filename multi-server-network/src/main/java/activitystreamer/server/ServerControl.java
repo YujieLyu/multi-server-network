@@ -6,33 +6,29 @@ import java.util.ArrayList;
 import java.util.HashMap;
 
 
-import activitystreamer.server.models.ClientModel;
-import activitystreamer.server.models.ServerModel;
 import activitystreamer.server.processors.ClientRequestProcessor;
 import activitystreamer.server.processors.ServerRequestProcessor;
-import activitystreamer.util.Helper;
+import activitystreamer.util.*;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import activitystreamer.util.Settings;
 import org.json.simple.JSONObject;
 
-import static activitystreamer.util.Constants.ClientCommands;
-import static activitystreamer.util.Constants.ServerCommands;
-import static activitystreamer.util.Constants.Info;
-import static activitystreamer.util.Constants.MsgAttribute;
+import static activitystreamer.util.Helper.getString;
 
+@SuppressWarnings("unchecked")
 public class ServerControl extends Thread {
     private static final Logger log = LogManager.getLogger();
     private static ArrayList<Connection> connections;
-    private static HashMap<String, ClientModel> connectedClients;
-    private static HashMap<String, ServerModel> connectedServers;
+    private static ArrayList<String> loggedInClients;
+    private static HashMap<String, Integer> allowedMap;
+    private static HashMap<String, String> registeredClients;
+    private static HashMap<String, Connection> reqServers;
+    private static HashMap<String, Connection> reqClients;
     private static ClientRequestProcessor clientProcessor;
     private static ServerRequestProcessor serverProcessor;
     private static boolean term = false;
     private static Listener listener;
-    private int conReplyCount = 0;
-    private int clientLoad = 0;
 
     protected static ServerControl serverControl = null;
 
@@ -49,8 +45,11 @@ public class ServerControl extends Thread {
          *  otherwise will use Settings.setSecret(Settings.nextSecret()) to generate a random secret
          */
         connections = new ArrayList<>();
-        connectedClients = new HashMap<>();
-        connectedServers = new HashMap<>();
+        loggedInClients = new ArrayList<>();
+        allowedMap = new HashMap<>();
+        registeredClients = new HashMap<>();
+        reqServers = new HashMap<>();
+        reqClients = new HashMap<>();
         clientProcessor = ClientRequestProcessor.getClientRequestProcessor();
         serverProcessor = ServerRequestProcessor.getServerRequestProcessor();
         initiateConnection();
@@ -68,7 +67,11 @@ public class ServerControl extends Thread {
         // make a connection to another server if remote hostname is supplied
         if (Settings.getRemoteHostname() != null) {
             try {
-                outgoingConnection(new Socket(Settings.getRemoteHostname(), Settings.getRemotePort()));
+                Connection c = outgoingConnection(new Socket(Settings.getRemoteHostname(), Settings.getRemotePort()));
+                JSONObject auth = new JSONObject();
+                auth.put(MsgField.COMMAND, Command.AUTHENTICATE);
+                auth.put(MsgField.SECRET, Settings.getSecret());
+                c.writeMsg(auth.toString());
             } catch (IOException e) {
                 log.error("failed to make connection to " + Settings.getRemoteHostname() + ":" + Settings.getRemotePort() + " :" + e);
                 System.exit(-1);
@@ -92,10 +95,6 @@ public class ServerControl extends Thread {
     public synchronized Connection outgoingConnection(Socket s) throws IOException {
         log.debug("outgoing connection: " + Settings.socketAddress(s));
         Connection c = new Connection(s);
-        JSONObject auth = new JSONObject();
-        auth.put(MsgAttribute.COMMAND, ServerCommands.AUTHENTICATE);
-        auth.put(MsgAttribute.SECRET, Settings.getSecret());
-        c.writeMsg(auth.toString());
         connections.add(c);
         return c;
     }
@@ -107,172 +106,220 @@ public class ServerControl extends Thread {
     @SuppressWarnings("unchecked")
     public synchronized boolean process(Connection con, String receivedMsg) {
         JSONObject output = null;
-        boolean shouldClose = false;
 
         try {
             JSONObject receivedObj = Helper.JsonParser(receivedMsg);
-            if (VerifyMessage(receivedObj)) {
-                String command = receivedObj.get(MsgAttribute.COMMAND).toString();
-                if (command.equals(ServerCommands.AUTHENTICATE) || command.equals(ServerCommands.SERVER_ANNOUNCE)) {
-                    con.isServer = true;
-                }
-                if (con.isServer) {
-                    String receivedCommand = receivedObj.get(MsgAttribute.COMMAND).toString();
-
-                    switch (receivedCommand) {
-                        case ServerCommands.AUTHENTICATE:
-                            shouldClose = !receivedObj.get(MsgAttribute.SECRET).toString().equals(Settings.getSecret());
-                            log.info("Authenticate failed: " + shouldClose);
-                            break;
-                        case ServerCommands.LOCK_REQUEST:
-                            JSONObject replyMsg = serverProcessor.processLockRequest(receivedObj.get(MsgAttribute.USERNAME).toString(),
-                                    receivedObj.get(MsgAttribute.PASSWORD).toString(), connectedClients);
-                            con.writeMsg(replyMsg.toString());
-                            break;
-                        case ServerCommands.LOCK_ALLOWED:
-                            log.info("LOCK_ALLOWED received");
-                            conReplyCount--;
-                            if (conReplyCount == 0) {
-                                clientProcessor.processRegisterUser(receivedObj.get(MsgAttribute.USERNAME).toString(),
-                                        receivedObj.get(MsgAttribute.PASSWORD).toString(),
-                                        true, connectedClients);
-                            }
-                            break;
-                        case ServerCommands.LOCK_DENIED:
-                            log.info("LOCK_DENIED received");
-                            clientProcessor.processRegisterUser(null, null, false, null);
-                            break;
-                        case ServerCommands.SERVER_ANNOUNCE:
-                            // Will send AUTHENTICATE if announcement from first received id
-                            serverProcessor.processServerAnnounce(receivedObj, connectedServers);
-                            break;
-                        case ServerCommands.ACTIVITY_BROADCAST:
-
-                            serverProcessor.processServerAnnounce(receivedObj, connectedServers);
-                            break;
-                        default:
-                            output = getJSONObject(ServerCommands.INVALID_MESSAGE);
-                            shouldClose = true;
-                    }
-                } else {
-                    String username = receivedObj.get(MsgAttribute.USERNAME).toString();
-                    String password = receivedObj.get(MsgAttribute.PASSWORD).toString();
-                    String receivedCommand = receivedObj.get(MsgAttribute.COMMAND).toString();
-
-                    switch (receivedCommand) {
-                        case ClientCommands.REGISTER:
-                            JSONObject msgToServer = new JSONObject();
-                            conReplyCount = connectedServers.size();
-                            if (conReplyCount == 0) {
-                                output = clientProcessor.processRegisterUser(username, password, true, connectedClients);
-                            } else {
-                                for (Connection conn : connections) {
-                                    if (conn.isServer) {
-                                        msgToServer.put(MsgAttribute.COMMAND, ServerCommands.LOCK_REQUEST);
-                                        msgToServer.put(MsgAttribute.USERNAME, username);
-                                        msgToServer.put(MsgAttribute.PASSWORD, password);
-                                        conn.writeMsg(msgToServer.toString());
-                                        log.info("LOCK_REQUEST sent");
-                                    }
-                                }
-                            }
-                            break;
-                        case ClientCommands.LOGIN:
-                            output = clientProcessor.verifyUserLogin(username, password, clientLoad, connectedClients);
-                            break;
-                        case ClientCommands.LOGOUT:
-                            output = getJSONObject(ClientCommands.LOGOUT);
-                            shouldClose = true;
-                            break;
-                        case ClientCommands.ACTIVITY_MESSAGE:
-                            String activity = receivedObj.get(MsgAttribute.ACTIVITY).toString();
-                            output = clientProcessor.verifyActivity(username, password, activity, connectedClients);
-                            if (output.get(MsgAttribute.COMMAND).toString().equals(ServerCommands.ACTIVITY_BROADCAST)) {
-                                broadcastActivity(receivedObj.get(MsgAttribute.ACTIVITY).toString());
-                            }
-                            break;
-                        default:
-                            output = getJSONObject(ServerCommands.INVALID_MESSAGE);
-                            shouldClose = true;
-                    }
-                }
-            } else {
-                output = getJSONObject(ServerCommands.INVALID_MESSAGE);
-                shouldClose = true;
+            if (!VerifyMessage(receivedObj)) {
+                con.reply(Command.INVALID_MESSAGE, Info.INVALID_MSG_INFO);
+                return true;
             }
+            String cmd = getString(receivedObj, MsgField.COMMAND);
 
-            if (output != null) {
-                con.writeMsg(output.toString());
+            switch (cmd) {
+                case Command.AUTHENTICATE:
+                    con.setServer(true);
+                    return !processAuth(receivedObj, con);
+                case Command.USER_CHECK:
+                    return !processUserCheck(receivedObj, con);
+                case Command.USER_ALLOWED:
+                    return !processUserAllowed(receivedObj, con);
+                case Command.USER_DENIED:
+                    return !processUserDenied(receivedObj, con);
+                case Command.SERVER_ANNOUNCE:
+                    // Will send AUTHENTICATE if announcement from first received id
+                    return !processServerAnnounce(receivedObj, con);
+                case Command.ACTIVITY_BROADCAST:
+                    return !processActivityBroadcast(receivedObj, con);
+                case Command.REGISTER:
+                    return !processRegister(receivedObj, con);
+                case Command.LOGIN:
+                    return !processLogin(receivedObj, con);
+                case Command.LOGOUT:
+                    return !processLogout(con);
+                case Command.ACTIVITY_MESSAGE:
+                    return !processActivityMsg(receivedMsg, con);
+                default:
+                    con.reply(Command.INVALID_MESSAGE, "Command is invalid");
+                    return true;
             }
-            return shouldClose;
         } catch (Exception e) {
             log.error("Error occurs when process received messages" + e.getMessage());
-            output = getJSONObject(ServerCommands.INVALID_MESSAGE);
-            con.writeMsg(output.toString());
+            con.reply(Command.ERRORS_OCCUR, e.getMessage());
             return true;
         }
+    }
+
+    private boolean processActivityMsg(String receivedMsg, Connection con) {
+        return false;
+    }
+
+    private boolean processLogout(Connection con) {
+        return false;
+    }
+
+    private boolean processLogin(JSONObject receivedObj, Connection con) {
+        return false;
+    }
+
+    private boolean processRegister(JSONObject receivedObj, Connection con) {
+        String username = getString(receivedObj, MsgField.USERNAME);
+        String secret = getString(receivedObj, MsgField.SECRET);
+        //invalid message if client has logged in
+        if (getClientStatus(username)) {
+            con.reply(Command.INVALID_MESSAGE, Info.REGISTER_FAILED_LOGIN_INFO);
+            return true;
+        }
+        //register failed because username is known by local
+        if (registeredClients.containsKey(username)) {
+            con.reply(Command.REGISTER_FAILED, Info.REGISTER_FAILED_USER_EXIST_INFO);
+            return true;
+        }
+        //send user check request
+        registeredClients.put(username, secret);
+        allowedMap.put(username, 0);
+        for (Connection c : connections) {
+            if (c.isServer) {
+                c.writeMsg(getReigsterProcessReq(username, secret, Command.USER_CHECK));
+            }
+        }
+        return false;
+    }
+
+
+    private boolean processAuth(JSONObject receivedObj, Connection con) {
+        String secret = getString(receivedObj, MsgField.SECRET);
+        if (secret.equals(Settings.getSecret())) {
+            log.info("Authenticated successfully");
+            return true;
+        }
+        con.reply(Command.AUTHENTICATION_FAIL, Info.AUTH_FAIL_SECRET_INCORRECT_INFO);
+        return false;
+    }
+
+    private boolean processUserCheck(JSONObject receivedObj, Connection con) {
+        String username = getString(receivedObj, MsgField.USERNAME);
+        String secret = getString(receivedObj, MsgField.SECRET);
+        if (registeredClients.containsKey(username)) {
+            con.writeMsg(getReigsterProcessReq(username, secret, Command.USER_DENIED));
+        } else if (countConnectedServers() - 1 <= 0) {
+            con.writeMsg(getReigsterProcessReq(username, secret, Command.USER_ALLOWED));
+        } else {
+            for (Connection c : connections) {
+                if (c.isServer && !c.equals(con)) {
+                    c.writeMsg(getReigsterProcessReq(username, secret, Command.USER_CHECK));
+                }
+            }
+        }
+        return false;
+    }
+
+    private int countConnectedServers() {
+        int count = 0;
+        for (Connection c : connections) {
+            if (c.isServer) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private boolean processUserAllowed(JSONObject receivedObj, Connection con) {
+        VerifyServer(con);
+        String username = getString(receivedObj, MsgField.USERNAME);
+        if (!allowedMap.containsKey(username)) {
+            return false;
+        }
+        int allowedCount = allowedMap.get(username);
+
+        return false;
+    }
+
+    private boolean processUserDenied(JSONObject receivedObj, Connection con) {
+        return false;
+    }
+
+    private boolean processServerAnnounce(JSONObject receivedObj, Connection con) {
+        return false;
+    }
+
+    private boolean processActivityBroadcast(JSONObject receivedObj, Connection con) {
+        return false;
     }
 
     public void broadcastActivity(String activity) {
         JSONObject output = new JSONObject();
         for (Connection con : connections) {
-            output.put(MsgAttribute.COMMAND, ServerCommands.ACTIVITY_BROADCAST);
-            output.put(MsgAttribute.ACTIVITY, activity);
+            output.put(MsgField.COMMAND, Command.ACTIVITY_BROADCAST);
+            output.put(MsgField.ACTIVITY, activity);
             con.writeMsg(output.toString());
             log.info("Announced to server");
         }
     }
 
+    private String getReigsterProcessReq(String username, String secret, String command) {
+        JSONObject checkReq = new JSONObject();
+        checkReq.put(MsgField.COMMAND, command);
+        checkReq.put(MsgField.USERNAME, username);
+        checkReq.put(MsgField.SECRET, secret);
+        return checkReq.toString();
+    }
+
+    private boolean getClientStatus(String username) {
+        return loggedInClients.contains(username);
+    }
+
+    private void VerifyServer(Connection con) {
+        if (!con.isServer) {
+            throw new IllegalArgumentException("Not a valid server");
+        }
+    }
+
     private boolean VerifyMessage(JSONObject msg) {
         String command;
-        if (msg == null || (command = msg.get(MsgAttribute.COMMAND).toString()) == null) {
+        if (msg == null || (command = msg.get(MsgField.COMMAND).toString()) == null) {
             return false;
         }
         switch (command) {
-            case ClientCommands.REGISTER:
-            case ClientCommands.LOGIN:
-            case ServerCommands.LOCK_REQUEST:
-            case ServerCommands.LOCK_ALLOWED:
-            case ServerCommands.LOCK_DENIED:
-                return msg.get(MsgAttribute.USERNAME) != null && msg.get(MsgAttribute.PASSWORD) != null;
-            case ClientCommands.ACTIVITY_MESSAGE:
-                return msg.get(MsgAttribute.USERNAME) != null && msg.get(MsgAttribute.PASSWORD) != null && msg.get(MsgAttribute.ACTIVITY) != null;
-            case ServerCommands.AUTHENTICATE:
-                return msg.get(MsgAttribute.SECRET) != null;
-            case ServerCommands.SERVER_ANNOUNCE:
-                return msg.get(MsgAttribute.ID) != null
-                        && msg.get(MsgAttribute.LOAD) != null
-                        && msg.get(MsgAttribute.HOSTNAME) != null
-                        && msg.get(MsgAttribute.PORT).toString() != null;
+            case Command.REGISTER:
+            case Command.LOGIN:
+            case Command.USER_CHECK:
+            case Command.USER_ALLOWED:
+            case Command.USER_DENIED:
+                return msg.get(MsgField.USERNAME) != null && msg.get(MsgField.PASSWORD) != null;
+            case Command.ACTIVITY_MESSAGE:
+                return msg.get(MsgField.USERNAME) != null && msg.get(MsgField.PASSWORD) != null && msg.get(MsgField.ACTIVITY) != null;
+            case Command.AUTHENTICATE:
+                return msg.get(MsgField.SECRET) != null;
+            case Command.SERVER_ANNOUNCE:
+                return msg.get(MsgField.ID) != null
+                        && msg.get(MsgField.LOAD) != null
+                        && msg.get(MsgField.HOSTNAME) != null
+                        && msg.get(MsgField.PORT).toString() != null;
             default:
                 return false;
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private JSONObject getJSONObject(String command) {
-        JSONObject output = new JSONObject();
-        output.put(MsgAttribute.COMMAND, command);
-        switch (command) {
-            case ServerCommands.INVALID_MESSAGE:
-                output.put(MsgAttribute.INFO, Info.INVALID_MSG_INFO);
-                break;
-            case ServerCommands.SERVER_ANNOUNCE:
-                output.put(MsgAttribute.ID, Settings.getSecret());
-                output.put(MsgAttribute.LOAD, connectedClients.size());
-                output.put(MsgAttribute.HOSTNAME, Settings.getLocalHostname());
-                output.put(MsgAttribute.PORT, Settings.getLocalPort());
-                break;
-            case ClientCommands.LOGOUT:
-                output.put(MsgAttribute.INFO, Info.LOGOUT_INFO);
-                break;
+    private void broadcast(Connection sender, JSONObject msg, boolean sendToServer) {
+        for (Connection con : connections) {
+            if (con == sender) continue;
+            if (!con.isServer) {
+                con.writeMsg(msg.toJSONString());
+            }
+            if (con.isServer() && sendToServer) {
+                con.writeMsg(msg.toString());
+            }
         }
-        return output;
     }
 
-    private void serverAnnounce(Connection con) {
-        JSONObject announcement = getJSONObject(ServerCommands.SERVER_ANNOUNCE);
-        con.writeMsg(announcement.toString());
+    private boolean serverAnnounce() {
+        JSONObject state = new JSONObject();
+        state.put(MsgField.ID, Settings.getSecret());
+        state.put(MsgField.LOAD, loggedInClients.size());
+        state.put(MsgField.HOSTNAME, Settings.getLocalHostname());
+        state.put(MsgField.PORT, Settings.getLocalPort());
+        broadcast(null, state, true);
+        return false;
     }
 
     /*
@@ -289,22 +336,15 @@ public class ServerControl extends Thread {
         while (!term) {
             // do something with 5 second intervals in between
             try {
-                for (Connection con : connections) {
-                    if (con.isServer) {
-                        serverAnnounce(con);
-                        log.info("Announced to server");
-                    }
-                }
                 Thread.sleep(Settings.getActivityInterval());
             } catch (InterruptedException e) {
                 log.info("received an interrupt, system is shutting down");
                 break;
             }
             if (!term) {
-                log.debug("Keep running");
-                term = doActivity();
+                log.debug("Announcing");
+                term = serverAnnounce();
             }
-
         }
         log.info("closing " + connections.size() + " connections");
         // clean up
@@ -312,10 +352,6 @@ public class ServerControl extends Thread {
             connection.closeCon();
         }
         listener.setTerm(true);
-    }
-
-    public boolean doActivity() {
-        return false;
     }
 
     public final void setTerm(boolean t) {

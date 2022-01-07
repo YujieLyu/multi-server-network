@@ -3,17 +3,10 @@ package activitystreamer.client;
 import java.io.*;
 import java.net.Socket;
 
-import activitystreamer.util.Helper;
+import activitystreamer.util.*;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.json.simple.JSONObject;
-
-import activitystreamer.util.Settings;
-
-import static activitystreamer.util.Constants.ClientCommands;
-import static activitystreamer.util.Constants.ServerCommands;
-import static activitystreamer.util.Constants.Info;
-import static activitystreamer.util.Constants.MsgAttribute;
 
 public class ClientControl extends Thread {
     private static final Logger log = LogManager.getLogger();
@@ -50,11 +43,11 @@ public class ClientControl extends Thread {
         JSONObject output = new JSONObject();
         JSONObject receivedObj = Helper.JsonParser(receivedMsg);
         try {
-            output.put("command", receivedObj.get(MsgAttribute.COMMAND).toString());
-            output.put("info", receivedObj.get(MsgAttribute.INFO).toString());
+            output.put("command", receivedObj.get(MsgField.COMMAND).toString());
+            output.put("info", receivedObj.get(MsgField.INFO).toString());
         } catch (Exception e) {
             log.error("Cannot process received message" + e.getMessage());
-            output.put("command", ClientCommands.INVALID_MESSAGE);
+            output.put("command", Command.INVALID_MESSAGE);
             output.put("info", Info.INVALID_MSG_INFO);
         }
         communicationFrame.setOutputText(output);
